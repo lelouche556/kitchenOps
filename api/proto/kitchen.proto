@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package kitchen.v1;
+
+option go_package = "SwishAssignment/api/gen/kitchen/v1;kitchenv1";
+
+message ConfirmOrderRequest {
+  string external_order_id = 1;
+  map<string, int32> items = 2;
+}
+
+message ConfirmOrderResponse {
+  uint64 order_id = 1;
+  repeated uint64 ready_task_ids = 2;
+}
+
+message AllocateOnceResponse {
+  uint64 assigned_task_id = 1;
+}
+
+message TaskStateResponse {
+  uint64 id = 1;
+  uint64 order_id = 2;
+  string description = 3;
+  string counter = 4;
+  string machine_required = 5;
+  int32 estimate_secs = 6;
+  string status = 7;
+  uint64 assigned_staff_id = 8;
+  uint64 assigned_machine_id = 9;
+  string assigned_at = 10;
+  string started_at = 11;
+  string completed_at = 12;
+}
