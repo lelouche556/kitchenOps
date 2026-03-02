@@ -34,6 +34,9 @@ func TestBulkOrdersEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("postgres connect failed: %v", err)
 	}
+	if err := resetKitchenRuntimeState(gdb); err != nil {
+		t.Fatalf("kitchen state reset failed: %v", err)
+	}
 	if err := ensureBurgerRecipeFastAndDependent(gdb); err != nil {
 		t.Fatalf("recipe test setup failed: %v", err)
 	}
@@ -289,4 +292,74 @@ func envOrDefault(key, fallback string) string {
 		return fallback
 	}
 	return val
+}
+
+func cleanupPreviousBulkTestData(gdb *gorm.DB) error {
+	return gdb.Transaction(func(tx *gorm.DB) error {
+		var orderIDs []uint64
+		if err := tx.Table("orders").Select("id").Where("external_order_id LIKE 'it-bulk-%'").Scan(&orderIDs).Error; err != nil {
+			return err
+		}
+		if len(orderIDs) == 0 {
+			return nil
+		}
+
+		var taskIDs []uint64
+		if err := tx.Table("tasks").Select("id").Where("order_id IN ?", orderIDs).Scan(&taskIDs).Error; err != nil {
+			return err
+		}
+		if len(taskIDs) > 0 {
+			if err := tx.Exec("DELETE FROM task_dependencies WHERE task_id IN ? OR depends_on_task_id IN ?", taskIDs, taskIDs).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("DELETE FROM tasks WHERE id IN ?", taskIDs).Error; err != nil {
+				return err
+			}
+			if err := tx.Exec("DELETE FROM domain_events WHERE aggregate_type = 'task' AND aggregate_id IN ?", uint64SliceToStrings(taskIDs)).Error; err != nil {
+				return err
+			}
+		}
+		if err := tx.Exec("DELETE FROM orders WHERE id IN ?", orderIDs).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func uint64SliceToStrings(ids []uint64) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, strconv.FormatUint(id, 10))
+	}
+	return out
+}
+
+func resetKitchenRuntimeState(gdb *gorm.DB) error {
+	return gdb.Transaction(func(tx *gorm.DB) error {
+		if err := cleanupPreviousBulkTestData(tx); err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM task_dependencies").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM tasks").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM orders").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM domain_events").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE staff SET active_tasks = 0, active_seconds = 0").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE counters SET in_use = 0, updated_at = NOW()").Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("UPDATE machines SET in_use = 0, updated_at = NOW()").Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
